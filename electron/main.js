@@ -84,6 +84,10 @@ ipcMain.handle('adb:pushFile', async (event, localPath, devicePath) => {
     return await adb.pushFile(localPath, devicePath);
 });
 
+ipcMain.handle('adb:deleteFile', async (event, devicePath) => {
+    return await adb.deleteFile(devicePath);
+});
+
 ipcMain.handle('adb:openFile', async (event, devicePath) => {
     try {
         const fileName = path.basename(devicePath);
@@ -106,4 +110,19 @@ ipcMain.handle('adb:openFile', async (event, devicePath) => {
         console.error("Failed to open file", e);
         return { error: e.message };
     }
+});
+ipcMain.handle('dialog:selectDirectory', async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+});
+
+ipcMain.handle('dialog:selectFiles', async () => {
+    const result = await dialog.showOpenDialog({
+        properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths;
 });

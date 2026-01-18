@@ -175,6 +175,72 @@ const GridName = styled.div`
   line-height: 1.2;
 `;
 
+// Context Menu Styles
+const Menu = styled.div`
+  position: fixed;
+  top: ${props => props.$y}px;
+  left: ${props => props.$x}px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  z-index: 1000;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+`;
+
+const MenuItem = styled.div`
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  &:hover {
+    background: var(--bg-tertiary);
+  }
+`;
+
+// Modal Styles
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+`;
+
+const Modal = styled.div`
+  background: var(--bg-secondary);
+  padding: 20px;
+  border-radius: 8px;
+  width: 400px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 15px rgba(0,0,0,0.3);
+`;
+
+const ModalTitle = styled.h3`
+  margin-top: 0;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 10px;
+`;
+
+const ModalContent = styled.div`
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ModalRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+`;
+
 const Explorer = ({ deviceId }) => {
   const [currentPath, setCurrentPath] = useState('/sdcard');
   const [files, setFiles] = useState([]);
@@ -183,6 +249,8 @@ const Explorer = ({ deviceId }) => {
   const [sortOption, setSortOption] = useState('name'); // name, size, date
   const [sortOrder, setSortOrder] = useState('asc'); // asc, desc
   const [viewMode, setViewMode] = useState('details'); // details, icons
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, file }
+  const [infoModal, setInfoModal] = useState(null); // file object
 
   const parseSize = (sizeStr) => {
     const parsed = parseInt(sizeStr, 10);
@@ -230,6 +298,13 @@ const Explorer = ({ deviceId }) => {
   useEffect(() => {
     setFiles(prev => sortFiles(prev, sortOption, sortOrder));
   }, [sortOption, sortOrder]);
+
+  // Close context menu on click elsewhere
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
 
   useEffect(() => {
     loadFiles(currentPath);
@@ -304,13 +379,120 @@ const Explorer = ({ deviceId }) => {
     }
   };
 
+
+
   const renderSortArrow = (field) => {
     if (sortOption !== field) return null;
     return sortOrder === 'asc' ? '↑' : '↓';
   };
 
+  const handleContextMenu = (e, file) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.pageX,
+      y: e.pageY,
+      file: file
+    });
+  };
+
+  const handleMenuAction = async (action) => {
+    // contextMenu might be null or { file: null } for background
+    // If file is null, it means background click (for Upload Here)
+    const file = contextMenu?.file;
+    setContextMenu(null);
+
+    switch (action) {
+      case 'open':
+        handleNavigate(file);
+        break;
+      case 'open_with':
+        // For now, same as open but maybe log or prompt later
+        handleNavigate(file);
+        break;
+      case 'info':
+        setInfoModal(file);
+        break;
+      case 'copy':
+        try {
+          await navigator.clipboard.writeText(file.path);
+          alert("Path copied to clipboard!");
+        } catch (err) {
+          console.error("Failed to copy", err);
+        }
+        break;
+      case 'delete':
+        if (confirm(`Are you sure you want to delete ${file.name}?`)) {
+          try {
+            await window.electron.deleteFile(file.path);
+            loadFiles(currentPath);
+          } catch (err) {
+            console.error("Delete failed", err);
+            alert("Failed to delete file");
+          }
+        }
+        break;
+      case 'save_to_mac':
+        try {
+          const localPath = await window.electron.selectDirectory();
+          if (localPath) {
+            const fileName = file.name;
+            // For directory pull, we might need adjustments in backend or assume adb pull handles it (it does recursive)
+            // We construct target path: localPath + / + fileName
+            // Actually adb pull <remote> <local_dir> pulls INTO dir or AS new name?
+            // "adb pull /sdcard/foo /tmp/bar" copies foo INTO bar if bar is dir.
+            // Let's pass the destination directory.
+            await window.electron.pullFile(file.path, localPath);
+            alert(`Saved to ${localPath}`);
+          }
+        } catch (err) {
+          console.error("Save failed", err);
+          alert("Failed to save to Mac");
+        }
+        break;
+      case 'upload_here':
+        // This action is usually for the background, but if clicked on a folder, we upload INTO it.
+        // If clicked on a file, we probably upload into currentPath.
+        // Let's assume this action is triggered on a folder or background.
+        {
+          const targetDir = file && file.isDir ? file.path : currentPath;
+          try {
+            const filesToUpload = await window.electron.selectFiles();
+            if (filesToUpload && filesToUpload.length > 0) {
+              for (const localFilePath of filesToUpload) {
+                // Push to targetDir/Filename (adb push <local> <remote_dir> works)
+                await window.electron.pushFile(localFilePath, targetDir);
+              }
+              loadFiles(currentPath);
+              alert("Upload complete");
+            }
+          } catch (err) {
+            console.error("Upload failed", err);
+            alert("Failed to upload");
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
-    <Container onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    <Container
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // Background click
+        if (e.target === e.currentTarget || e.target.closest('div[id^="explorer-bg"]')) {
+          setContextMenu({
+            x: e.pageX,
+            y: e.pageY,
+            file: null // Represents current directory background
+          });
+        }
+      }}
+    >
       <Toolbar>
         <Button onClick={handleUp} disabled={currentPath === '/'}>⬆️ Up</Button>
         <PathBar
@@ -333,7 +515,7 @@ const Explorer = ({ deviceId }) => {
             <HeaderCell onClick={() => handleSort('date')}>Date {renderSortArrow('date')}</HeaderCell>
           </HeaderRow>
           {loading ? <div style={{ padding: 20 }}>Loading...</div> : files.map((file, idx) => (
-            <Row key={idx} onDoubleClick={() => handleNavigate(file)}>
+            <Row key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
               <Cell>
                 <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
                 {file.name}
@@ -347,7 +529,7 @@ const Explorer = ({ deviceId }) => {
       ) : (
         <GridList>
           {loading ? <div style={{ padding: 20 }}>Loading...</div> : files.map((file, idx) => (
-            <GridItem key={idx} onDoubleClick={() => handleNavigate(file)}>
+            <GridItem key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
               <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
               <GridName>{file.name}</GridName>
             </GridItem>
@@ -356,6 +538,43 @@ const Explorer = ({ deviceId }) => {
       )}
 
       {isDragging && <DropZone>Drop files to upload to Android</DropZone>}
+
+      {contextMenu && (
+        <Menu $x={contextMenu.x} $y={contextMenu.y} onClick={(e) => e.stopPropagation()}>
+          {contextMenu.file ? (
+            <>
+              <MenuItem onClick={() => handleMenuAction('open')}>Open</MenuItem>
+              <MenuItem onClick={() => handleMenuAction('info')}>Get Info</MenuItem>
+              <MenuItem onClick={() => handleMenuAction('copy')}>Copy Path</MenuItem>
+              <MenuItem onClick={() => handleMenuAction('save_to_mac')}>Save to Mac...</MenuItem>
+              {contextMenu.file.isDir && <MenuItem onClick={() => handleMenuAction('upload_here')}>Upload Files Here...</MenuItem>}
+              <MenuItem style={{ color: '#ef4444' }} onClick={() => handleMenuAction('delete')}>Delete</MenuItem>
+            </>
+          ) : (
+            <>
+              <MenuItem onClick={() => handleMenuAction('upload_here')}>Upload Files Here...</MenuItem>
+            </>
+          )}
+        </Menu>
+      )}
+
+      {infoModal && (
+        <ModalOverlay onClick={() => setInfoModal(null)}>
+          <Modal onClick={(e) => e.stopPropagation()}>
+            <ModalTitle>File Info</ModalTitle>
+            <ModalContent>
+              <ModalRow><strong>Name:</strong> <span>{infoModal.name}</span></ModalRow>
+              <ModalRow><strong>Type:</strong> <span>{infoModal.isDir ? 'Directory' : 'File'}</span></ModalRow>
+              <ModalRow><strong>Path:</strong> <span style={{ fontSize: '0.8rem' }}>{infoModal.path}</span></ModalRow>
+              <ModalRow><strong>Size:</strong> <span>{formatSize(infoModal.size, infoModal.isDir)}</span></ModalRow>
+              <ModalRow><strong>Date:</strong> <span>{formatDate(infoModal.date)}</span></ModalRow>
+            </ModalContent>
+            <div style={{ marginTop: 20, textAlign: 'right' }}>
+              <Button onClick={() => setInfoModal(null)}>Close</Button>
+            </div>
+          </Modal>
+        </ModalOverlay>
+      )}
     </Container >
   );
 };

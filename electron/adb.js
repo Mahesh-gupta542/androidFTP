@@ -75,6 +75,12 @@ module.exports = {
         return runAdb(`push "${localPath}" "${devicePath}"`);
     },
 
+    deleteFile: (devicePath) => {
+        // Use -f to force, -r for recursive (folders)
+        // Need to be careful with quoting
+        return runAdb(`shell rm -rf "${devicePath}"`);
+    },
+
     // Expose raw command for other needs
     run: runAdb
 };
