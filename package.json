@@ -14,7 +14,8 @@
     "appId": "com.maheshgupta.androidftp",
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.png"
     },
     "files": [
       "dist/**/*",
