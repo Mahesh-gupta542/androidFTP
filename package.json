@@ -8,7 +8,19 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "electron ."
+    "dist": "vite build && electron-builder"
+  },
+  "build": {
+    "appId": "com.maheshgupta.androidftp",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": "dmg"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ]
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -20,6 +32,7 @@
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^29.1.0",
+    "electron-builder": "^26.4.0",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",

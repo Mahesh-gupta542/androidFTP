@@ -16,22 +16,24 @@ function createWindow() {
     });
 
     // In dev, load from vite dev server. In prod, load file.
-    // Since we don't have dev server running effectively, we might rely on building or simplified loading.
-    // For now, assuming standard Vite dev URL
-    const devUrl = 'http://localhost:5173';
+    const isDev = !app.isPackaged;
 
-    // We can also try to load index.html directly if not running dev server
-    // win.loadFile(path.join(__dirname, '../dist/index.html'));
-
-    // But wait, the user instructions for this agent simulation imply we are running in dev mode usually.
-    // Since I can't run npm run dev, the user will have to do it.
-
-    win.loadURL(devUrl).catch(() => {
-        console.log("Dev server not running, trying static file");
-        // Fallback
-        win.loadFile(path.join(__dirname, '../index.html'));
-        // Note: loading src/index.html directly won't work well with modules without vite processing.
-    });
+    if (isDev) {
+        const devUrl = 'http://localhost:5173';
+        win.loadURL(devUrl).catch(() => {
+            console.log("Dev server not running, trying static file");
+            win.loadFile(path.join(__dirname, '../index.html'));
+        });
+    } else {
+        // In production, load the built index.html from the dist folder
+        // The dist folder is at the root level in the package, so ../dist/index.html relative to electron/main.js
+        // But with electron-builder 'files' config, distinct structure might vary, but usually consistent.
+        // Wait, 'files': ["dist/**/*", "electron/**/*"] preserving structure? 
+        // If we package '.' as root, then electron/main.js is in /electron/main.js
+        // and dist is in /dist/
+        // So path.join(__dirname, '../dist/index.html') is correct.
+        win.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
 
     // Open DevTools
     // win.webContents.openDevTools();
