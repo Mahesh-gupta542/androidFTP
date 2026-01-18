@@ -246,7 +246,7 @@ const Explorer = ({ deviceId }) => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [sortOption, setSortOption] = useState('name'); // name, size, date
+  const [sortOption, setSortOption] = useState('name'); // name, size, date, type
   const [sortOrder, setSortOrder] = useState('asc'); // asc, desc
   const [viewMode, setViewMode] = useState('details'); // details, icons
   const [contextMenu, setContextMenu] = useState(null); // { x, y, file }
@@ -273,6 +273,8 @@ const Explorer = ({ deviceId }) => {
         comparison = parseSize(a.size) - parseSize(b.size);
       } else if (criterion === 'date') {
         comparison = parseDate(a.date) - parseDate(b.date);
+      } else if (criterion === 'type') {
+        comparison = getFileType(a.name, a.isDir).localeCompare(getFileType(b.name, b.isDir));
       }
       return order === 'asc' ? comparison : -comparison;
     });
@@ -510,7 +512,7 @@ const Explorer = ({ deviceId }) => {
         <Table>
           <HeaderRow>
             <HeaderCell onClick={() => handleSort('name')}>Name {renderSortArrow('name')}</HeaderCell>
-            <HeaderCell>Type</HeaderCell>
+            <HeaderCell onClick={() => handleSort('type')}>Type {renderSortArrow('type')}</HeaderCell>
             <HeaderCell onClick={() => handleSort('size')}>Size {renderSortArrow('size')}</HeaderCell>
             <HeaderCell onClick={() => handleSort('date')}>Date {renderSortArrow('date')}</HeaderCell>
           </HeaderRow>
