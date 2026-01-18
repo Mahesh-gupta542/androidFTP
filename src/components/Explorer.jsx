@@ -82,7 +82,15 @@ const Row = styled.div`
   font-size: 0.9rem;
   cursor: pointer;
   align-items: center;
-  
+  background: ${props => props.$isSelected ? 'var(--bg-tertiary)' : 'transparent'};
+  border: ${props => props.$isSelected ? '1px solid var(--accent-color)' : '1px solid transparent'}; /* Keep border width consistent to avoid layout shift, but transparent when not selected, except bottom border handled separately? actually border variable handles it */
+  /* Actually the original had border-bottom. Let's make sure we don't double borders. */
+  border-bottom: 1px solid var(--border-color); 
+  /* If selected, we might want to override border color. */
+  ${props => props.$isSelected && `
+    border-color: var(--accent-color);
+  `}
+
   &:hover {
     background: var(--bg-tertiary);
   }
@@ -156,6 +164,8 @@ const GridItem = styled.div`
   border-radius: 8px;
   cursor: pointer;
   text-align: center;
+  background: ${props => props.$isSelected ? 'var(--bg-tertiary)' : 'transparent'};
+  border: ${props => props.$isSelected ? '1px solid var(--accent-color)' : 'none'};
   
   &:hover {
     background: var(--bg-tertiary);
@@ -266,6 +276,13 @@ const GroupHeader = styled.div`
   }
 `;
 
+const Checkbox = styled.input`
+  margin-right: 8px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+`;
+
 const Explorer = ({ deviceId }) => {
   const [currentPath, setCurrentPath] = useState('/sdcard');
   const [files, setFiles] = useState([]);
@@ -276,6 +293,7 @@ const Explorer = ({ deviceId }) => {
   const [viewMode, setViewMode] = useState('details'); // details, icons
   const [groupByType, setGroupByType] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set()); // Start with none collapsed
+  const [selectedFiles, setSelectedFiles] = useState(new Set()); // Set of file paths
   const [contextMenu, setContextMenu] = useState(null); // { x, y, file }
   const [infoModal, setInfoModal] = useState(null); // file object
 
@@ -333,6 +351,7 @@ const Explorer = ({ deviceId }) => {
       alert("Failed to list directory");
     } finally {
       setLoading(false);
+      setSelectedFiles(new Set());
     }
   };
 
@@ -420,6 +439,40 @@ const Explorer = ({ deviceId }) => {
     }
   };
 
+  const calculateGroupedFiles = (fileList) => {
+    // This is essentially same as groupFiles but meant to be memoized or just used in render
+    const groups = {};
+    if (!groupByType) return null;
+
+    fileList.forEach(file => {
+      const type = getFileType(file.name, file.isDir);
+      if (!groups[type]) {
+        groups[type] = [];
+      }
+      groups[type].push(file);
+    });
+    // Sort keys here 
+    const sortedKeys = Object.keys(groups).sort();
+    return { groups, sortedKeys };
+  };
+
+  const handleGroupSelect = (e, filesInGroup) => {
+    e.stopPropagation(); // Prevent toggling collapse
+    const allSelected = filesInGroup.every(f => selectedFiles.has(f.path));
+
+    setSelectedFiles(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        // Deselect all in group
+        filesInGroup.forEach(f => next.delete(f.path));
+      } else {
+        // Select all in group
+        filesInGroup.forEach(f => next.add(f.path));
+      }
+      return next;
+    });
+  };
+
   const toggleGroup = (type) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
@@ -432,6 +485,24 @@ const Explorer = ({ deviceId }) => {
     });
   };
 
+  const handleSelect = (e, file) => {
+    // If cmd or ctrl key is pressed, toggle selection
+    if (e.metaKey || e.ctrlKey) {
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        if (next.has(file.path)) {
+          next.delete(file.path);
+        } else {
+          next.add(file.path);
+        }
+        return next;
+      });
+    } else {
+      // Standard click - select only this one
+      setSelectedFiles(new Set([file.path]));
+    }
+  };
+
 
 
   const renderSortArrow = (field) => {
@@ -441,6 +512,15 @@ const Explorer = ({ deviceId }) => {
 
   const handleContextMenu = (e, file) => {
     e.preventDefault();
+    e.stopPropagation(); // Stop propagation to container
+
+    // Logic for right click selection behavior
+    if (!selectedFiles.has(file.path)) {
+      // If right clicking an unselected file, select it exclusively
+      setSelectedFiles(new Set([file.path]));
+    }
+    // If right clicking a selected file, do not change selection (allows batch action)
+
     setContextMenu({
       x: e.pageX,
       y: e.pageY,
@@ -467,20 +547,25 @@ const Explorer = ({ deviceId }) => {
         break;
       case 'copy':
         try {
-          await navigator.clipboard.writeText(file.path);
-          alert("Path copied to clipboard!");
+          // Copy all selected paths
+          const paths = Array.from(selectedFiles).join('\n');
+          await navigator.clipboard.writeText(paths);
+          alert(`${selectedFiles.size} path(s) copied to clipboard!`);
         } catch (err) {
           console.error("Failed to copy", err);
         }
         break;
       case 'delete':
-        if (confirm(`Are you sure you want to delete ${file.name}?`)) {
+        if (confirm(`Are you sure you want to delete ${selectedFiles.size} Item(s)?`)) {
           try {
-            await window.electron.deleteFile(file.path);
+            for (const path of selectedFiles) {
+              await window.electron.deleteFile(path);
+            }
             loadFiles(currentPath);
+            setSelectedFiles(new Set()); // Clear selection
           } catch (err) {
             console.error("Delete failed", err);
-            alert("Failed to delete file");
+            alert("Failed to delete files");
           }
         }
         break;
@@ -488,14 +573,10 @@ const Explorer = ({ deviceId }) => {
         try {
           const localPath = await window.electron.selectDirectory();
           if (localPath) {
-            const fileName = file.name;
-            // For directory pull, we might need adjustments in backend or assume adb pull handles it (it does recursive)
-            // We construct target path: localPath + / + fileName
-            // Actually adb pull <remote> <local_dir> pulls INTO dir or AS new name?
-            // "adb pull /sdcard/foo /tmp/bar" copies foo INTO bar if bar is dir.
-            // Let's pass the destination directory.
-            await window.electron.pullFile(file.path, localPath);
-            alert(`Saved to ${localPath}`);
+            for (const path of selectedFiles) {
+              await window.electron.pullFile(path, localPath);
+            }
+            alert(`Saved ${selectedFiles.size} file(s) to ${localPath}`);
           }
         } catch (err) {
           console.error("Save failed", err);
@@ -536,13 +617,20 @@ const Explorer = ({ deviceId }) => {
       onDrop={handleDrop}
       onContextMenu={(e) => {
         e.preventDefault();
-        // Background click
+        // Background click - clear selection
         if (e.target === e.currentTarget || e.target.closest('div[id^="explorer-bg"]')) {
+          setSelectedFiles(new Set());
           setContextMenu({
             x: e.pageX,
             y: e.pageY,
             file: null // Represents current directory background
           });
+        }
+      }}
+      onClick={(e) => {
+        // Background click - clear selection
+        if (e.target === e.currentTarget) {
+          setSelectedFiles(new Set());
         }
       }}
     >
@@ -573,28 +661,56 @@ const Explorer = ({ deviceId }) => {
           </HeaderRow>
           {loading ? <div style={{ padding: 20 }}>Loading...</div> : (
             groupByType ? (
-              Object.keys(groupFiles(files)).sort().map(type => (
-                <React.Fragment key={type}>
-                  <GroupHeader onClick={() => toggleGroup(type)}>
-                    <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
-                    {type} ({groupFiles(files)[type].length})
-                  </GroupHeader>
-                  {!collapsedGroups.has(type) && groupFiles(files)[type].map((file, idx) => (
-                    <Row key={`${type}-${idx}`} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
-                      <Cell>
-                        <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
-                        {file.name}
-                      </Cell>
-                      <Cell>{getFileType(file.name, file.isDir)}</Cell>
-                      <Cell>{formatSize(file.size, file.isDir)}</Cell>
-                      <Cell>{formatDate(file.date)}</Cell>
-                    </Row>
-                  ))}
-                </React.Fragment>
-              ))
+              (() => {
+                const { groups, sortedKeys } = calculateGroupedFiles(files);
+                return sortedKeys.map(type => {
+                  const groupFilesList = groups[type];
+                  const isAllSelected = groupFilesList.every(f => selectedFiles.has(f.path));
+
+                  return (
+                    <React.Fragment key={type}>
+                      <GroupHeader onClick={() => toggleGroup(type)}>
+                        <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                          <Checkbox
+                            type="checkbox"
+                            checked={isAllSelected}
+                            onChange={(e) => handleGroupSelect(e, groupFilesList)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
+                          <span style={{ marginLeft: 5 }}>{type} ({groupFilesList.length})</span>
+                        </div>
+                      </GroupHeader>
+                      {!collapsedGroups.has(type) && groupFilesList.map((file, idx) => (
+                        <Row
+                          key={`${type}-${idx}`}
+                          $isSelected={selectedFiles.has(file.path)}
+                          onClick={(e) => handleSelect(e, file)}
+                          onDoubleClick={() => handleNavigate(file)}
+                          onContextMenu={(e) => handleContextMenu(e, file)}
+                        >
+                          <Cell>
+                            <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
+                            {file.name}
+                          </Cell>
+                          <Cell>{getFileType(file.name, file.isDir)}</Cell>
+                          <Cell>{formatSize(file.size, file.isDir)}</Cell>
+                          <Cell>{formatDate(file.date)}</Cell>
+                        </Row>
+                      ))}
+                    </React.Fragment>
+                  );
+                });
+              })()
             ) : (
               files.map((file, idx) => (
-                <Row key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                <Row
+                  key={idx}
+                  $isSelected={selectedFiles.has(file.path)}
+                  onClick={(e) => handleSelect(e, file)}
+                  onDoubleClick={() => handleNavigate(file)}
+                  onContextMenu={(e) => handleContextMenu(e, file)}
+                >
                   <Cell>
                     <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
                     {file.name}
@@ -611,23 +727,51 @@ const Explorer = ({ deviceId }) => {
         <GridList>
           {loading ? <div style={{ padding: 20 }}>Loading...</div> : (
             groupByType ? (
-              Object.keys(groupFiles(files)).sort().map(type => (
-                <React.Fragment key={type}>
-                  <GroupHeader onClick={() => toggleGroup(type)}>
-                    <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
-                    {type} ({groupFiles(files)[type].length})
-                  </GroupHeader>
-                  {!collapsedGroups.has(type) && groupFiles(files)[type].map((file, idx) => (
-                    <GridItem key={`${type}-${idx}`} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
-                      <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
-                      <GridName>{file.name}</GridName>
-                    </GridItem>
-                  ))}
-                </React.Fragment>
-              ))
+              (() => {
+                const { groups, sortedKeys } = calculateGroupedFiles(files);
+                return sortedKeys.map(type => {
+                  const groupFilesList = groups[type];
+                  const isAllSelected = groupFilesList.every(f => selectedFiles.has(f.path));
+
+                  return (
+                    <React.Fragment key={type}>
+                      <GroupHeader onClick={() => toggleGroup(type)}>
+                        <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                          <Checkbox
+                            type="checkbox"
+                            checked={isAllSelected}
+                            onChange={(e) => handleGroupSelect(e, groupFilesList)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
+                          <span style={{ marginLeft: 5 }}>{type} ({groupFilesList.length})</span>
+                        </div>
+                      </GroupHeader>
+                      {!collapsedGroups.has(type) && groupFilesList.map((file, idx) => (
+                        <GridItem
+                          key={`${type}-${idx}`}
+                          $isSelected={selectedFiles.has(file.path)}
+                          onClick={(e) => handleSelect(e, file)}
+                          onDoubleClick={() => handleNavigate(file)}
+                          onContextMenu={(e) => handleContextMenu(e, file)}
+                        >
+                          <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
+                          <GridName>{file.name}</GridName>
+                        </GridItem>
+                      ))}
+                    </React.Fragment>
+                  );
+                });
+              })()
             ) : (
               files.map((file, idx) => (
-                <GridItem key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                <GridItem
+                  key={idx}
+                  $isSelected={selectedFiles.has(file.path)}
+                  onClick={(e) => handleSelect(e, file)}
+                  onDoubleClick={() => handleNavigate(file)}
+                  onContextMenu={(e) => handleContextMenu(e, file)}
+                >
                   <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
                   <GridName>{file.name}</GridName>
                 </GridItem>
@@ -680,4 +824,3 @@ const Explorer = ({ deviceId }) => {
 };
 
 export default Explorer;
-
