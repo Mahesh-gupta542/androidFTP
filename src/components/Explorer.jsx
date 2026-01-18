@@ -241,6 +241,31 @@ const ModalRow = styled.div`
   justify-content: space-between;
 `;
 
+const GroupHeader = styled.div`
+  grid-column: 1 / -1;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: bold;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  &:first-child {
+    margin-top: 0;
+  }
+  
+  &:hover {
+    background: var(--bg-secondary);
+  }
+`;
+
 const Explorer = ({ deviceId }) => {
   const [currentPath, setCurrentPath] = useState('/sdcard');
   const [files, setFiles] = useState([]);
@@ -249,6 +274,8 @@ const Explorer = ({ deviceId }) => {
   const [sortOption, setSortOption] = useState('name'); // name, size, date, type
   const [sortOrder, setSortOrder] = useState('asc'); // asc, desc
   const [viewMode, setViewMode] = useState('details'); // details, icons
+  const [groupByType, setGroupByType] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set()); // Start with none collapsed
   const [contextMenu, setContextMenu] = useState(null); // { x, y, file }
   const [infoModal, setInfoModal] = useState(null); // file object
 
@@ -279,6 +306,18 @@ const Explorer = ({ deviceId }) => {
       return order === 'asc' ? comparison : -comparison;
     });
     return sorted;
+  };
+
+  const groupFiles = (fileList) => {
+    const groups = {};
+    fileList.forEach(file => {
+      const type = getFileType(file.name, file.isDir);
+      if (!groups[type]) {
+        groups[type] = [];
+      }
+      groups[type].push(file);
+    });
+    return groups;
   };
 
   const loadFiles = async (path) => {
@@ -379,6 +418,18 @@ const Explorer = ({ deviceId }) => {
       setSortOption(field);
       setSortOrder('asc');
     }
+  };
+
+  const toggleGroup = (type) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
   };
 
 
@@ -505,6 +556,10 @@ const Explorer = ({ deviceId }) => {
         <Button onClick={() => setViewMode(prev => prev === 'details' ? 'icons' : 'details')} title="Toggle View">
           {viewMode === 'details' ? '🖼️ Icons' : '📝 List'}
         </Button>
+
+        <Button onClick={() => setGroupByType(prev => !prev)} title="Group by Type">
+          {groupByType ? '📂 Ungroup' : '🗂️ Group'}
+        </Button>
         <Button onClick={() => loadFiles(currentPath)}>🔄 Refresh</Button>
       </Toolbar>
 
@@ -516,26 +571,69 @@ const Explorer = ({ deviceId }) => {
             <HeaderCell onClick={() => handleSort('size')}>Size {renderSortArrow('size')}</HeaderCell>
             <HeaderCell onClick={() => handleSort('date')}>Date {renderSortArrow('date')}</HeaderCell>
           </HeaderRow>
-          {loading ? <div style={{ padding: 20 }}>Loading...</div> : files.map((file, idx) => (
-            <Row key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
-              <Cell>
-                <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
-                {file.name}
-              </Cell>
-              <Cell>{getFileType(file.name, file.isDir)}</Cell>
-              <Cell>{formatSize(file.size, file.isDir)}</Cell>
-              <Cell>{formatDate(file.date)}</Cell>
-            </Row>
-          ))}
+          {loading ? <div style={{ padding: 20 }}>Loading...</div> : (
+            groupByType ? (
+              Object.keys(groupFiles(files)).sort().map(type => (
+                <React.Fragment key={type}>
+                  <GroupHeader onClick={() => toggleGroup(type)}>
+                    <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
+                    {type} ({groupFiles(files)[type].length})
+                  </GroupHeader>
+                  {!collapsedGroups.has(type) && groupFiles(files)[type].map((file, idx) => (
+                    <Row key={`${type}-${idx}`} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                      <Cell>
+                        <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
+                        {file.name}
+                      </Cell>
+                      <Cell>{getFileType(file.name, file.isDir)}</Cell>
+                      <Cell>{formatSize(file.size, file.isDir)}</Cell>
+                      <Cell>{formatDate(file.date)}</Cell>
+                    </Row>
+                  ))}
+                </React.Fragment>
+              ))
+            ) : (
+              files.map((file, idx) => (
+                <Row key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                  <Cell>
+                    <span style={{ marginRight: 5 }}>{file.isDir ? '📁' : '📄'}</span>
+                    {file.name}
+                  </Cell>
+                  <Cell>{getFileType(file.name, file.isDir)}</Cell>
+                  <Cell>{formatSize(file.size, file.isDir)}</Cell>
+                  <Cell>{formatDate(file.date)}</Cell>
+                </Row>
+              ))
+            )
+          )}
         </Table>
       ) : (
         <GridList>
-          {loading ? <div style={{ padding: 20 }}>Loading...</div> : files.map((file, idx) => (
-            <GridItem key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
-              <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
-              <GridName>{file.name}</GridName>
-            </GridItem>
-          ))}
+          {loading ? <div style={{ padding: 20 }}>Loading...</div> : (
+            groupByType ? (
+              Object.keys(groupFiles(files)).sort().map(type => (
+                <React.Fragment key={type}>
+                  <GroupHeader onClick={() => toggleGroup(type)}>
+                    <span>{collapsedGroups.has(type) ? '▶' : '▼'}</span>
+                    {type} ({groupFiles(files)[type].length})
+                  </GroupHeader>
+                  {!collapsedGroups.has(type) && groupFiles(files)[type].map((file, idx) => (
+                    <GridItem key={`${type}-${idx}`} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                      <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
+                      <GridName>{file.name}</GridName>
+                    </GridItem>
+                  ))}
+                </React.Fragment>
+              ))
+            ) : (
+              files.map((file, idx) => (
+                <GridItem key={idx} onDoubleClick={() => handleNavigate(file)} onContextMenu={(e) => handleContextMenu(e, file)}>
+                  <GridIcon $isDir={file.isDir}>{file.isDir ? '📁' : '📄'}</GridIcon>
+                  <GridName>{file.name}</GridName>
+                </GridItem>
+              ))
+            )
+          )}
         </GridList>
       )}
 
