@@ -20,9 +20,11 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/**/*.map",
       "electron/**/*",
       "package.json"
     ],
+    "compression": "maximum",
     "extraResources": [
       {
         "from": "resources/bin",
