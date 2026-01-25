@@ -14,12 +14,27 @@ const checkAdb = (pathToCheck) => {
     });
 };
 
-const init = async (userDataPath) => {
+const init = async (userDataPath, isPackaged) => {
     const configPath = path.join(userDataPath, 'config.json');
     let foundPath = null;
 
+    // 0. Check bundled ADB (Highest Priority)
+    let bundledPath;
+    if (isPackaged) {
+        // In production: resources/bin/mac/adb -> .../Contents/Resources/bin/mac/adb
+        bundledPath = path.join(process.resourcesPath, 'bin', 'mac', 'adb');
+    } else {
+        // In dev: .../resources/bin/mac/adb (relative to project root, assuming cwd is project root)
+        bundledPath = path.resolve('resources', 'bin', 'mac', 'adb');
+    }
+
+    if (fs.existsSync(bundledPath) && await checkAdb(bundledPath)) {
+        foundPath = bundledPath;
+        console.log("[ADB] Found bundled binary:", foundPath);
+    }
+
     // 1. Check existing config
-    if (fs.existsSync(configPath)) {
+    if (!foundPath && fs.existsSync(configPath)) {
         try {
             const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
             if (config.adbPath && await checkAdb(config.adbPath)) {

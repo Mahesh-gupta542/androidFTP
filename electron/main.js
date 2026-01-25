@@ -41,7 +41,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
     // Initialize ADB module (check path/config)
-    await adb.init(app.getPath('userData'));
+    await adb.init(app.getPath('userData'), app.isPackaged);
 
     createWindow();
 
