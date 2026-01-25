@@ -39,7 +39,10 @@ function createWindow() {
     // win.webContents.openDevTools();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    // Initialize ADB module (check path/config)
+    await adb.init(app.getPath('userData'));
+
     createWindow();
 
     app.on('activate', () => {
@@ -88,6 +91,10 @@ ipcMain.handle('adb:pushFile', async (event, localPath, devicePath) => {
 
 ipcMain.handle('adb:deleteFile', async (event, devicePath) => {
     return await adb.deleteFile(devicePath);
+});
+
+ipcMain.handle('adb:deleteFiles', async (event, devicePaths) => {
+    return await adb.deleteFiles(devicePaths);
 });
 
 ipcMain.handle('adb:openFile', async (event, devicePath) => {

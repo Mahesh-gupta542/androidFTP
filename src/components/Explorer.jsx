@@ -284,7 +284,7 @@ const Checkbox = styled.input`
 `;
 
 const Explorer = ({ deviceId }) => {
-  const [currentPath, setCurrentPath] = useState('/sdcard');
+  const [currentPath, setCurrentPath] = useState('/');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -367,8 +367,8 @@ const Explorer = ({ deviceId }) => {
   }, []);
 
   useEffect(() => {
-    loadFiles(currentPath);
-  }, [deviceId]); // Reload if device changes, but ideally we retain path or reset to /sdcard
+    loadFiles('/');
+  }, [deviceId]); // Reload if device changes, resetting to root
 
   const handleNavigate = async (file) => {
     if (file.isDir) {
@@ -558,9 +558,7 @@ const Explorer = ({ deviceId }) => {
       case 'delete':
         if (confirm(`Are you sure you want to delete ${selectedFiles.size} Item(s)?`)) {
           try {
-            for (const path of selectedFiles) {
-              await window.electron.deleteFile(path);
-            }
+            await window.electron.deleteFiles(Array.from(selectedFiles));
             loadFiles(currentPath);
             setSelectedFiles(new Set()); // Clear selection
           } catch (err) {
